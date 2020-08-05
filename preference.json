@@ -1,0 +1,67 @@
+{
+  "id": "ddl",
+  "name": "DDL",
+  "schema": {
+    "ddl.gen": {
+      "text": "DDL Generation",
+      "type": "section"
+    },
+    "ddl.gen.fileExtension": {
+      "text": "DDL File Extension",
+      "description": "DDL File Extension",
+      "type": "dropdown",
+      "options": [
+        { "value": ".sql", "text": ".sql" },
+        { "value": ".ddl", "text": ".ddl" }
+      ],
+      "default": ".sql"
+    },
+    "ddl.gen.quoteIdentifiers": {
+      "text": "Quote Identifiers",
+      "description": "Quote identifiers",
+      "type": "check",
+      "default": true
+    },
+    "ddl.gen.dropTable": {
+      "text": "Drop Tables",
+      "description": "Drop tables before create",
+      "type": "check",
+      "default": true
+    },
+    "ddl.gen.dbms": {
+      "text": "DBMS",
+      "description": "Select a DBMS where generated DDL to be executed",
+      "type": "dropdown",
+      "options": [
+        { "value": "mysql",  "text": "MySQL" },
+        { "value": "oracle", "text": "Oracle" },
+        { "value": "mssql", "text": "MSSQL" }
+      ],
+      "default": "mssql"
+    },
+    "ddl.gen.wp": {
+      "text": "File options (with)",
+      "description": "Set file options (with paramn)",
+      "type": "string",
+      "default": "PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON"
+    },
+    "ddl.gen.fg": {
+      "text": "File Group",
+      "description": "Set the file group",
+      "type": "string",
+      "default": "PRIMARY"
+    },
+    "ddl.gen.useTab": {
+      "text": "Use Tab",
+      "description": "Use Tab for indentation instead of spaces.",
+      "type": "check",
+      "default": false
+    },
+    "ddl.gen.indentSpaces": {
+      "text": "Indent Spaces",
+      "description": "Number of spaces for indentation.",
+      "type": "number",
+      "default": 4
+    }
+  }
+}
