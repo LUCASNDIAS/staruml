@@ -1,0 +1,386 @@
+/*
+ * Copyright (c) 2014-2018 MKLab. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ */
+
+const fs = require('fs')
+const codegen = require('./codegen-utils')
+
+/**
+ * DDL Generator
+ */
+class DDLGenerator {
+  /**
+   * @constructor
+   *
+   * @param {type.ERDDataModel} baseModel
+   * @param {string} basePath generated files and directories to be placed
+   */
+  constructor(baseModel, basePath) {
+    /** @member {type.Model} */
+    this.baseModel = baseModel
+
+    /** @member {string} */
+    this.basePath = basePath
+  }
+
+  /**
+   * Return Indent String based on options
+   * @param {Object} options
+   * @return {string}
+   */
+  getIndentString(options) {
+    if (options.useTab) {
+      return '\t'
+    } else {
+      var i, len
+      var indent = []
+      for (i = 0, len = options.indentSpaces; i < len; i++) {
+        indent.push(' ')
+      }
+      return indent.join('')
+    }
+  };
+
+  /**
+   * Return Identifier (Quote or not)
+   * @param {String} id
+   * @param {Object} options
+   */
+  getId(id, options) {
+    if (options.quoteIdentifiers) {
+      return '[' + id + ']'
+    }
+    return id
+  }
+
+  /**
+   * Return Primary Keys for an Entity
+   * @param {type.ERDEntity} elem
+   * @return {Array.<ERDColumn>}
+   */
+  getPrimaryKeys(elem) {
+    var keys = []
+    elem.columns.forEach(function (col) {
+      if (col.primaryKey) {
+        keys.push(col)
+      }
+    })
+    return keys
+  }
+
+  /**
+   * Return Foreign Keys for an Entity
+   * @param {type.ERDEntity} elem
+   * @return {Array.<ERDColumn>}
+   */
+  getForeignKeys(elem) {
+    var keys = []
+    elem.columns.forEach(function (col) {
+      if (col.foreignKey) {
+        keys.push(col)
+      }
+    })
+    return keys
+  }
+
+  /**
+   * Return DDL column string
+   * @param {type.ERDColumn} elem
+   * @param {Object} options
+   * @return {String}
+   */
+  getColumnString(elem, options) {
+    var self = this
+    var line = self.getId(elem.name, options)
+    var _type = elem.getTypeString()
+    if (_type.trim().length === 0) {
+      _type = 'INTEGER'
+    }
+    line += ' ' + _type
+    if (elem.primaryKey || !elem.nullable) {
+      line += ' NOT NULL'
+    }
+    return line
+  }
+
+  /**
+   * Write Foreign Keys
+   * @param {StringWriter} codeWriter
+   * @param {type.ERDEntity} elem
+   * @param {Object} options
+   */
+  writeForeignKeys(codeWriter, elem, options) {
+    var self = this
+    var fks = self.getForeignKeys(elem)
+    var ends = elem.getRelationshipEnds(true)
+
+    ends.forEach(function (end) {
+      if (end.cardinality === '1') {
+        var _pks = self.getPrimaryKeys(end.reference)
+        if (_pks.length > 0) {
+          var matched = true
+          var matchedFKs = []
+          _pks.forEach(function (pk) {
+            var r = fks.find(function (k) { return k.referenceTo === pk })
+            if (r) {
+              matchedFKs.push(r)
+            } else {
+              matched = false
+            }
+          })
+
+          if (matched) {
+            fks = fks.filter(e => { return !matchedFKs.includes(e) })
+            var line = 'ALTER TABLE '
+            line += self.getId(elem.name, options) + ' '
+            line += 'ADD FOREIGN KEY (' + matchedFKs.map(function (k) { return self.getId(k.name, options) }).join(', ') + ') '
+            line += 'REFERENCES ' + self.getId(_pks[0]._parent.name, options)
+            line += '(' + _pks.map(function (k) { return self.getId(k.name, options) }) + ');'
+            codeWriter.writeLine(line)
+          }
+        }
+      }
+    })
+    fks.forEach(function (fk) {
+      if (fk.referenceTo) {
+        var nameCompleto = self.getId(elem.name, options).split('.');
+        var nameParent = self.getId(fk.referenceTo._parent.name, options).split('.');
+        var nameSchema = nameCompleto[0].replace('[', '').replace(']', '');
+        var nameTable = nameCompleto[1].replace('[', '').replace(']', '');
+        var nameTableParent = nameParent[1].replace('[', '').replace(']', '');
+        var nameFk = "[FK_" + nameSchema + "_" + nameTable + "_" + nameTableParent + "]";
+        var line = 'ALTER TABLE ';
+        line += self.getId(elem.name, options) + ' ';
+        line += 'WITH CHECK ADD CONSTRAINT ' + nameFk + ' ';
+        line += 'FOREIGN KEY ([' + self.getId(fk.name, options) + ']) ';
+        line += 'REFERENCES ' + self.getId(fk.referenceTo._parent.name, options);
+        line += '(' + self.getId(fk.referenceTo.name, options) + ');';
+        codeWriter.writeLine(line)
+      }
+    })
+  }
+
+  /**
+   * Write Drop Table
+   * @param {StringWriter} codeWriter
+   * @param {type.ERDEntity} elem
+   * @param {Object} options
+   */
+  writeDropTable(codeWriter, elem, options) {
+    if (options.dbms === 'mysql') {
+      codeWriter.writeLine('DROP TABLE IF EXISTS ' + this.getId(elem.name, options) + ';')
+    } else if (options.dbms === 'oracle') {
+      codeWriter.writeLine('DROP TABLE ' + this.getId(elem.name, options) + ' CASCADE CONSTRAINTS;')
+    } else if (options.dbms === 'mssql') {
+
+      var nameSplit = this.getId(elem.name, options).split('.');
+      // var nameSplit = this.getId(elem.name, options).replace("[", "").replace("]", "");
+      var nameSchema = nameSplit[0].replace("[", "").replace("]", "");
+      var nameTable = nameSplit[1].replace("[", "").replace("]", "");
+
+      var apagarTable = "IF (EXISTS (SELECT * ";
+      apagarTable += "FROM INFORMATION_SCHEMA.TABLES ";
+      apagarTable += "WHERE TABLE_SCHEMA = '" + nameSchema + "' ";
+      apagarTable += "AND TABLE_NAME = '" + nameTable + "')) ";
+      apagarTable += "BEGIN ";
+      apagarTable += 'DROP TABLE ' + this.getId(elem.name, options) + '; ';
+      apagarTable += "END;";
+      codeWriter.writeLine(apagarTable);
+    }
+  }
+
+  /**
+   * Write Table
+   * @param {StringWriter} codeWriter
+   * @param {type.ERDEntity} elem
+   * @param {Object} options
+   */
+  writeTable(codeWriter, elem, options) {
+    var self = this
+    var lines = []
+    var primaryKeys = []
+    var uniques = []
+    var fg = "[" + options.fg + "]";
+    var wp = "WITH (" + options.wp + ") ON " + fg;
+    var nomeTabela = self.getId(elem.name, options);
+    var nomePk = "[PK_" + nomeTabela.replace('].[', '_').replace('[', '');
+    var constraintPk = "CONSTRAINT " + nomePk + " PRIMARY KEY CLUSTERED (";
+
+    // Table
+    codeWriter.writeLine('CREATE TABLE ' + self.getId(elem.name, options) + ' (')
+    codeWriter.indent()
+
+    // Columns
+    elem.columns.forEach(function (col) {
+      if (col.primaryKey) {
+        primaryKeys.push(self.getId(col.name, options))
+      }
+      if (col.unique) {
+        uniques.push(self.getId(col.name, options))
+      }
+      lines.push(self.getColumnString(col, options))
+    })
+
+    if (options.dbms !== 'mssql') {
+      // Primary Keys
+      if (primaryKeys.length > 0) {
+        lines.push('PRIMARY KEY (' + primaryKeys.join(', ') + ')')
+      }
+
+      // Uniques
+      if (uniques.length > 0) {
+        lines.push('UNIQUE (' + uniques.join(', ') + ')')
+      }
+
+    } else {
+      if (primaryKeys.length > 0) {
+        constraintPk += primaryKeys.join(', ') + " ASC )";
+        constraintPk += wp;
+        lines.push(constraintPk);
+      }
+
+      // Uniques
+      if (uniques.length > 0) {
+        lines.push('UNIQUE (' + uniques.join(', ') + ')')
+      }
+    }
+
+    // Write lines
+    for (var i = 0, len = lines.length; i < len; i++) {
+      codeWriter.writeLine(lines[i] + (i < len - 1 ? ',' : ''))
+    }
+
+    codeWriter.outdent()
+    if (options.dbms !== 'mssql') {
+      codeWriter.writeLine(');')
+    } else {
+      codeWriter.writeLine(') ON ' + fg)
+    }
+    codeWriter.writeLine()
+  }
+
+  /**
+   * Generate codes from a given element
+   * @param {type.Model} elem
+   * @param {string} path
+   * @param {Object} options
+   * @return {$.Promise}
+   */
+  generate(elem, basePath, options) {
+    var codeWriter
+    var schemaArray = []
+    var nameSplit = []
+    // DataModel
+    if (elem instanceof type.ERDDataModel) {
+      codeWriter = new codegen.CodeWriter(this.getIndentString(options))
+
+      // Drop Tables
+      if (options.dropTable) {
+        if (options.dbms === 'mysql') {
+          codeWriter.writeLine('SET FOREIGN_KEY_CHECKS = 0;')
+        }
+        //Estrutura de schemas
+        elem.ownedElements.forEach(e => {
+          if (e instanceof type.ERDEntity) {
+            nameSplit = this.getId(e.name, options).split('.');
+            var nameSchemaDrop = nameSplit[0].replace("[", "").replace("]", "");
+            if (schemaArray.indexOf(nameSchemaDrop) < 0)
+            {
+              schemaArray.push(nameSchemaDrop);
+            }
+
+          }
+        })
+
+        // Estrutura condicional de bloqueio de drop
+        codeWriter.writeLine('DECLARE	@AUTH BIT SET @AUTH = 0 IF (@AUTH = 1) BEGIN')
+        codeWriter.writeLine();
+        codeWriter.writeLine();
+
+        codeWriter.writeLine("--DECLARE @sql NVARCHAR(MAX) = N''");
+        codeWriter.writeLine("--SELECT @sql += N'");
+        codeWriter.writeLine("--ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(FK.parent_object_id))");
+        codeWriter.writeLine("--    + '.' + QUOTENAME(OBJECT_NAME(FK.parent_object_id)) + ");
+        codeWriter.writeLine("--    ' DROP CONSTRAINT ' + QUOTENAME(FK.name) + ';'")
+        codeWriter.writeLine("--FROM sys.foreign_keys FK");
+        codeWriter.writeLine("--INNER JOIN sys.schemas S ON FK.schema_id = S.schema_id");
+        codeWriter.writeLine("--WHERE");
+
+        schemaArray.forEach(function (valor, index) {
+          if(index == 0){
+            codeWriter.writeLine("--S.name = '" + valor + "'");
+          }else{
+            codeWriter.writeLine("--OR S.name = '" + valor + "'");
+          }
+        });
+        codeWriter.writeLine("--PRINT @sql;");
+        codeWriter.writeLine("--EXEC sp_executesql @sql;");
+
+        codeWriter.writeLine();
+        codeWriter.writeLine();
+        
+        elem.ownedElements.forEach(e => {
+          if (e instanceof type.ERDEntity) {
+            this.writeDropTable(codeWriter, e, options)
+            codeWriter.writeLine();
+          }
+        })
+        codeWriter.writeLine('END;')
+
+        if (options.dbms === 'mysql') {
+          codeWriter.writeLine('SET FOREIGN_KEY_CHECKS = 1;')
+        }
+        codeWriter.writeLine()
+      }
+
+      // Tables
+      elem.ownedElements.forEach(e => {
+        if (e instanceof type.ERDEntity) {
+          this.writeTable(codeWriter, e, options)
+        }
+      })
+
+      // Foreign Keys
+      elem.ownedElements.forEach(e => {
+        if (e instanceof type.ERDEntity) {
+          this.writeForeignKeys(codeWriter, e, options)
+        }
+      })
+
+      // Others (Nothing generated.)
+      fs.writeFileSync(basePath, codeWriter.getData())
+    }
+  }
+}
+
+/**
+ * Generate
+ * @param {type.Model} baseModel
+ * @param {string} basePath
+ * @param {Object} options
+ */
+function generate(baseModel, basePath, options) {
+  var generator = new DDLGenerator(baseModel, basePath)
+  return generator.generate(baseModel, basePath, options)
+}
+
+exports.generate = generate

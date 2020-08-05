@@ -1,0 +1,18 @@
+{
+  "name": "sipom.staruml-ddl",
+  "title": "DDL (Data Definition Language)",
+  "description": "Generate DDL (Data Definition Language) from ERD",
+  "homepage": "https://github.com/LUCASNDIAS/ddl",
+  "issues": "https://github.com/LUCASNDIAS/ddl/issues",
+  "keywords": ["ddl", "erd", "database"],
+  "version": "1.0.0",
+  "author": {
+    "name": "Sipom",
+    "email": "desenvolvimento@reint.mg.gov.br",
+    "url": "https://github.com/LUCASNDIAS"
+  },
+  "license": "MIT",
+  "engines": {
+    "staruml": "^3.0.0"
+  }
+}
